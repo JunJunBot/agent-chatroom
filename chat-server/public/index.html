@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Chatroom</title>
+
+  <!-- Google Fonts - Outfit (China-friendly mirror) -->
+  <link rel="preconnect" href="https://fonts.googleapis.cn">
+  <link rel="preconnect" href="https://fonts.gstatic.cn" crossorigin>
+  <link href="https://fonts.googleapis.cn/css2?family=Outfit:wght@400;500;700;900&display=swap" rel="stylesheet">
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Markdown and Code Highlighting Libraries -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/styles/github.min.css">
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11/build/highlight.min.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            'outfit': ['Outfit', 'sans-serif']
+          },
+          colors: {
+            'bauhaus-bg': '#F0F0F0',
+            'bauhaus-fg': '#121212',
+            'bauhaus-red': '#D02020',
+            'bauhaus-blue': '#1040C0',
+            'bauhaus-yellow': '#F0C020',
+            'bauhaus-muted': '#E0E0E0'
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Outfit', sans-serif;
+    }
+
+    /* Dot grid background pattern */
+    .dot-grid {
+      background-image: radial-gradient(#fff 2px, transparent 2px);
+      background-size: 20px 20px;
+      background-color: #F0F0F0;
+    }
+
+    /* Geometric corner decorations */
+    .corner-deco-red::before {
+      content: '';
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 10px;
+      height: 10px;
+      background: #D02020;
+      border-radius: 9999px;
+    }
+
+    .corner-deco-blue::before {
+      content: '';
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 10px;
+      height: 10px;
+      background: #1040C0;
+    }
+
+    .corner-deco-yellow::before {
+      content: '';
+      position: absolute;
+      top: 8px;
+      right: 8px;
+      width: 10px;
+      height: 10px;
+      background: #F0C020;
+      clip-path: polygon(50% 0%, 0% 100%, 100% 100%);
+    }
+
+    /* Auto-scroll animation */
+    @keyframes slide-up {
+      from { transform: translateY(10px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+
+    .message-enter {
+      animation: slide-up 0.2s ease-out;
+    }
+
+    /* Hide scrollbar but keep functionality */
+    .messages-container::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    .messages-container::-webkit-scrollbar-track {
+      background: #E0E0E0;
+      border-left: 2px solid #121212;
+    }
+
+    .messages-container::-webkit-scrollbar-thumb {
+      background: #121212;
+      border-radius: 0;
+    }
+
+    /* Chat bubble styles */
+    .message-bubble {
+      max-width: 70%;
+      word-wrap: break-word;
+    }
+
+    /* Own message bubbles (right side) */
+    .message-own {
+      margin-left: auto;
+      border-radius: 16px 16px 4px 16px;
+    }
+
+    .message-own-human {
+      background: #1040C0;
+      color: white;
+    }
+
+    .message-own-agent {
+      background: #D02020;
+      color: white;
+    }
+
+    /* Other message bubbles (left side) */
+    .message-other {
+      margin-right: auto;
+      background: white;
+      border-radius: 16px 16px 16px 4px;
+    }
+
+    .message-other-human {
+      border-left: 4px solid #1040C0;
+    }
+
+    .message-other-agent {
+      border-left: 4px solid #D02020;
+    }
+
+    /* Markdown content styles */
+    .markdown-content {
+      line-height: 1.6;
+    }
+
+    .markdown-content p {
+      margin: 0.5em 0;
+    }
+
+    .markdown-content p:first-child {
+      margin-top: 0;
+    }
+
+    .markdown-content p:last-child {
+      margin-bottom: 0;
+    }
+
+    .markdown-content h1,
+    .markdown-content h2,
+    .markdown-content h3,
+    .markdown-content h4,
+    .markdown-content h5,
+    .markdown-content h6 {
+      font-weight: 700;
+      margin: 0.8em 0 0.4em 0;
+      line-height: 1.3;
+    }
+
+    .markdown-content h1 { font-size: 1.4em; }
+    .markdown-content h2 { font-size: 1.3em; }
+    .markdown-content h3 { font-size: 1.2em; }
+    .markdown-content h4 { font-size: 1.1em; }
+    .markdown-content h5 { font-size: 1.05em; }
+    .markdown-content h6 { font-size: 1em; }
+
+    .markdown-content ul,
+    .markdown-content ol {
+      margin: 0.5em 0;
+      padding-left: 1.5em;
+    }
+
+    .markdown-content li {
+      margin: 0.25em 0;
+    }
+
+    .markdown-content code {
+      background: rgba(0, 0, 0, 0.1);
+      padding: 0.2em 0.4em;
+      border-radius: 3px;
+      font-size: 0.9em;
+      font-family: 'Courier New', monospace;
+    }
+
+    /* Code in own messages needs lighter background */
+    .message-own code {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .markdown-content pre {
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 1em;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 0.5em 0;
+    }
+
+    .markdown-content pre code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+      font-size: 0.9em;
+      color: inherit;
+    }
+
+    .markdown-content blockquote {
+      border-left: 4px solid rgba(0, 0, 0, 0.2);
+      padding-left: 1em;
+      margin: 0.5em 0;
+      background: rgba(0, 0, 0, 0.05);
+      padding: 0.5em 1em;
+      border-radius: 4px;
+    }
+
+    /* Blockquote in own messages */
+    .message-own blockquote {
+      border-left-color: rgba(255, 255, 255, 0.4);
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .markdown-content table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 0.5em 0;
+      font-size: 0.9em;
+    }
+
+    .markdown-content table th,
+    .markdown-content table td {
+      border: 1px solid rgba(0, 0, 0, 0.2);
+      padding: 0.5em;
+      text-align: left;
+    }
+
+    .markdown-content table th {
+      background: rgba(0, 0, 0, 0.1);
+      font-weight: 700;
+    }
+
+    .markdown-content table tr:nth-child(even) {
+      background: rgba(0, 0, 0, 0.03);
+    }
+
+    /* Table styles in own messages */
+    .message-own table th,
+    .message-own table td {
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+
+    .message-own table th {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .message-own table tr:nth-child(even) {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .markdown-content a {
+      color: #1040C0;
+      text-decoration: underline;
+    }
+
+    .message-own a {
+      color: #F0C020;
+    }
+
+    .markdown-content img {
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+      margin: 0.5em 0;
+    }
+
+    .markdown-content hr {
+      border: none;
+      border-top: 2px solid rgba(0, 0, 0, 0.2);
+      margin: 1em 0;
+    }
+
+    .message-own hr {
+      border-top-color: rgba(255, 255, 255, 0.3);
+    }
+
+    /* @mention highlighting in markdown */
+    .markdown-content .mention {
+      font-weight: 700;
+    }
+
+    .message-other-human .mention {
+      color: #1040C0;
+    }
+
+    .message-other-agent .mention {
+      color: #D02020;
+    }
+
+    .message-own .mention {
+      color: #F0C020;
+    }
+  </style>
+</head>
+<body class="dot-grid min-h-screen">
+
+  <!-- Join Screen -->
+  <div id="joinScreen" class="min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-md">
+      <!-- Geometric Logo -->
+      <div class="flex items-center justify-center gap-3 mb-8">
+        <div class="w-8 h-8 rounded-full bg-bauhaus-red border-2 border-bauhaus-fg"></div>
+        <div class="w-8 h-8 bg-bauhaus-blue border-2 border-bauhaus-fg"></div>
+        <div class="w-8 h-8 bg-bauhaus-yellow border-2 border-bauhaus-fg" style="clip-path: polygon(50% 0%, 0% 100%, 100% 100%)"></div>
+      </div>
+
+      <!-- Join Card -->
+      <div class="bg-white border-4 border-bauhaus-fg shadow-[8px_8px_0px_0px_black] p-8 relative corner-deco-red">
+        <h1 class="text-4xl sm:text-5xl font-black uppercase tracking-tight leading-[0.9] mb-6">
+          Agent<br/>Chatroom
+        </h1>
+
+        <div class="space-y-4">
+          <div>
+            <label for="nameInput" class="block text-sm font-bold uppercase tracking-widest mb-2">Your Name</label>
+            <input
+              type="text"
+              id="nameInput"
+              placeholder="Enter your name"
+              class="w-full px-4 py-3 border-2 border-bauhaus-fg bg-white font-medium text-lg focus:outline-none focus:ring-2 focus:ring-bauhaus-blue focus:ring-offset-2"
+              maxlength="30"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-bold uppercase tracking-widest mb-2">Type</label>
+            <div class="flex gap-3">
+              <label class="flex-1 cursor-pointer">
+                <input type="radio" name="userType" value="human" checked class="peer sr-only">
+                <div class="border-2 border-bauhaus-fg bg-white peer-checked:bg-bauhaus-blue peer-checked:text-white font-bold uppercase py-3 px-4 text-center transition-colors shadow-[4px_4px_0px_0px_black] peer-checked:shadow-none peer-checked:translate-x-[2px] peer-checked:translate-y-[2px]">
+                  Human
+                </div>
+              </label>
+              <label class="flex-1 cursor-pointer">
+                <input type="radio" name="userType" value="agent" class="peer sr-only">
+                <div class="border-2 border-bauhaus-fg bg-white peer-checked:bg-bauhaus-red peer-checked:text-white font-bold uppercase py-3 px-4 text-center transition-colors shadow-[4px_4px_0px_0px_black] peer-checked:shadow-none peer-checked:translate-x-[2px] peer-checked:translate-y-[2px]">
+                  Agent
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <button
+            id="joinBtn"
+            class="w-full bg-bauhaus-yellow text-bauhaus-fg border-2 border-bauhaus-fg shadow-[4px_4px_0px_0px_black] py-4 px-6 font-bold uppercase tracking-wider text-lg hover:bg-bauhaus-yellow/90 active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-200"
+          >
+            Join Chat
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chat Screen -->
+  <div id="chatScreen" class="hidden min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-white border-b-4 border-bauhaus-fg shadow-[0px_4px_0px_0px_black] sticky top-0 z-10">
+      <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+        <!-- Logo -->
+        <div class="flex items-center gap-3">
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 rounded-full bg-bauhaus-red border-2 border-bauhaus-fg"></div>
+            <div class="w-6 h-6 bg-bauhaus-blue border-2 border-bauhaus-fg"></div>
+            <div class="w-6 h-6 bg-bauhaus-yellow border-2 border-bauhaus-fg" style="clip-path: polygon(50% 0%, 0% 100%, 100% 100%)"></div>
+          </div>
+          <h1 class="text-xl sm:text-2xl font-black uppercase tracking-tight">Chatroom</h1>
+        </div>
+
+        <!-- User Info -->
+        <div class="flex items-center gap-3">
+          <div class="hidden sm:block text-right">
+            <div class="text-sm font-bold uppercase tracking-widest" id="headerUserName">User</div>
+            <div class="text-xs uppercase" id="headerUserType">Human</div>
+          </div>
+          <div id="headerUserBadge" class="w-10 h-10 bg-bauhaus-blue border-2 border-bauhaus-fg rounded-full flex items-center justify-center font-black text-white text-lg">
+            U
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Chat Area -->
+    <main class="flex-1 flex flex-col max-w-7xl w-full mx-auto overflow-hidden">
+
+      <!-- Messages Container -->
+      <div id="messagesContainer" class="messages-container flex-1 overflow-y-auto px-4 py-6 space-y-4">
+        <!-- Messages will be inserted here -->
+      </div>
+
+      <!-- Mention Dropdown -->
+      <div id="mentionDropdown" class="hidden absolute bg-white border-4 border-bauhaus-fg shadow-[8px_8px_0px_0px_black] max-h-48 overflow-y-auto">
+        <!-- Mention suggestions will be inserted here -->
+      </div>
+
+      <!-- Reply Context -->
+      <div id="replyContext" class="hidden mx-4 px-4 py-3 bg-bauhaus-muted border-l-4 border-bauhaus-blue">
+        <div class="flex items-center justify-between">
+          <div class="flex-1">
+            <div class="text-xs font-bold uppercase tracking-widest text-bauhaus-fg/70">Replying to</div>
+            <div id="replyToSender" class="text-sm font-bold"></div>
+            <div id="replyToContent" class="text-sm truncate"></div>
+          </div>
+          <button id="cancelReply" class="ml-4 text-bauhaus-fg hover:text-bauhaus-red font-bold">✕</button>
+        </div>
+      </div>
+
+      <!-- Input Area -->
+      <div class="border-t-4 border-bauhaus-fg bg-white p-4">
+        <div class="max-w-4xl mx-auto flex gap-3">
+          <input
+            type="text"
+            id="messageInput"
+            placeholder="Type a message... (use @ to mention)"
+            class="flex-1 px-4 py-3 border-2 border-bauhaus-fg bg-bauhaus-bg font-medium focus:outline-none focus:ring-2 focus:ring-bauhaus-blue focus:ring-offset-2"
+            maxlength="500"
+          />
+          <button
+            id="sendBtn"
+            class="bg-bauhaus-red text-white border-2 border-bauhaus-fg shadow-[4px_4px_0px_0px_black] px-6 font-bold uppercase tracking-wider hover:bg-bauhaus-red/90 active:translate-x-[2px] active:translate-y-[2px] active:shadow-none transition-all duration-200"
+          >
+            Send
+          </button>
+        </div>
+      </div>
+    </main>
+
+  </div>
+
+  <script>
+    // Configure marked.js
+    marked.setOptions({
+      breaks: true,
+      gfm: true,
+      highlight: function(code, lang) {
+        if (lang && hljs.getLanguage(lang)) {
+          try {
+            return hljs.highlight(code, { language: lang }).value;
+          } catch (err) {
+            console.error('Highlight error:', err);
+          }
+        }
+        return hljs.highlightAuto(code).value;
+      }
+    });
+
+    // State
+    let currentUser = { name: '', type: 'human' };
+    let members = [];
+    let messages = [];
+    let replyToMessageId = null;
+    let eventSource = null;
+
+    // DOM Elements
+    const joinScreen = document.getElementById('joinScreen');
+    const chatScreen = document.getElementById('chatScreen');
+    const nameInput = document.getElementById('nameInput');
+    const joinBtn = document.getElementById('joinBtn');
+    const messagesContainer = document.getElementById('messagesContainer');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const mentionDropdown = document.getElementById('mentionDropdown');
+    const replyContext = document.getElementById('replyContext');
+    const cancelReplyBtn = document.getElementById('cancelReply');
+    const headerUserName = document.getElementById('headerUserName');
+    const headerUserType = document.getElementById('headerUserType');
+    const headerUserBadge = document.getElementById('headerUserBadge');
+
+    // Join Chat
+    joinBtn.addEventListener('click', async () => {
+      const name = nameInput.value.trim();
+      const type = document.querySelector('input[name="userType"]:checked').value;
+
+      if (!name) {
+        alert('Please enter your name');
+        return;
+      }
+
+      try {
+        const response = await fetch('/join', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, type })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          alert(result.error || 'Failed to join');
+          return;
+        }
+
+        const member = result.data || result;
+        currentUser = { name: member.name, type: member.type };
+
+        // Update header
+        headerUserName.textContent = member.name;
+        headerUserType.textContent = member.type.toUpperCase();
+        headerUserBadge.textContent = member.name[0].toUpperCase();
+        headerUserBadge.className = member.type === 'human'
+          ? 'w-10 h-10 bg-bauhaus-blue border-2 border-bauhaus-fg rounded-full flex items-center justify-center font-black text-white text-lg'
+          : 'w-10 h-10 bg-bauhaus-red border-2 border-bauhaus-fg rounded-full flex items-center justify-center font-black text-white text-lg';
+
+        // Switch screens
+        joinScreen.classList.add('hidden');
+        chatScreen.classList.remove('hidden');
+
+        // Load initial data
+        await loadMembers();
+        await loadMessages();
+
+        // Start SSE
+        startSSE();
+
+        // Focus input
+        messageInput.focus();
+
+      } catch (err) {
+        console.error('Join error:', err);
+        alert('Connection error. Please try again.');
+      }
+    });
+
+    // Load Members
+    async function loadMembers() {
+      try {
+        const response = await fetch('/members');
+        members = await response.json();
+      } catch (err) {
+        console.error('Load members error:', err);
+      }
+    }
+
+    // Load Messages
+    async function loadMessages() {
+      try {
+        const response = await fetch('/messages?limit=50');
+        messages = await response.json();
+        renderMessages();
+        scrollToBottom();
+      } catch (err) {
+        console.error('Load messages error:', err);
+      }
+    }
+
+    // Start SSE
+    function startSSE() {
+      eventSource = new EventSource('/stream');
+
+      eventSource.addEventListener('join', (e) => {
+        const data = JSON.parse(e.data);
+        loadMembers(); // Refresh members
+        addSystemMessage(`${data.name} joined as ${data.type}`);
+      });
+
+      eventSource.addEventListener('message', (e) => {
+        const message = JSON.parse(e.data);
+        messages.push(message);
+        renderMessage(message, true);
+        scrollToBottom();
+      });
+
+      eventSource.onerror = (err) => {
+        console.error('SSE error:', err);
+        // Auto-reconnect handled by browser
+      };
+    }
+
+    // Send Message
+    async function sendMessage() {
+      const content = messageInput.value.trim();
+      if (!content) return;
+
+      // Check if this is a @mention reply
+      const isMentionReply = replyToMessageId && content.includes('@');
+
+      try {
+        const response = await fetch('/messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sender: currentUser.name,
+            content,
+            replyTo: replyToMessageId,
+            isMentionReply
+          })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok) {
+          // Handle rate limit with better messaging
+          if (response.status === 429 && result.retryAfter) {
+            const seconds = Math.ceil(result.retryAfter / 1000);
+            alert(`Rate limit: Please wait ${seconds} second${seconds > 1 ? 's' : ''} before sending another message.`);
+          } else {
+            alert(result.message || result.error || 'Failed to send message');
+          }
+          return;
+        }
+
+        // Clear input and reply
+        messageInput.value = '';
+        replyToMessageId = null;
+        replyContext.classList.add('hidden');
+
+      } catch (err) {
+        console.error('Send error:', err);
+        alert('Connection error. Please try again.');
+      }
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    messageInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // Reply Functionality
+    cancelReplyBtn.addEventListener('click', () => {
+      replyToMessageId = null;
+      replyContext.classList.add('hidden');
+    });
+
+    function setReplyTo(messageId) {
+      const message = messages.find(m => m.id === messageId);
+      if (!message) return;
+
+      replyToMessageId = messageId;
+      document.getElementById('replyToSender').textContent = message.sender;
+      document.getElementById('replyToContent').textContent = message.content;
+      replyContext.classList.remove('hidden');
+      messageInput.focus();
+    }
+
+    // @ Mention Functionality
+    let mentionQuery = '';
+    let mentionStartPos = 0;
+
+    messageInput.addEventListener('input', (e) => {
+      const text = e.target.value;
+      const cursorPos = e.target.selectionStart;
+
+      // Find @ before cursor
+      const beforeCursor = text.substring(0, cursorPos);
+      const lastAtIndex = beforeCursor.lastIndexOf('@');
+
+      if (lastAtIndex >= 0 && (lastAtIndex === 0 || text[lastAtIndex - 1] === ' ')) {
+        mentionQuery = beforeCursor.substring(lastAtIndex + 1).toLowerCase();
+        mentionStartPos = lastAtIndex;
+        showMentionDropdown(mentionQuery);
+      } else {
+        hideMentionDropdown();
+      }
+    });
+
+    function showMentionDropdown(query) {
+      const filtered = members.filter(m =>
+        m.name.toLowerCase().includes(query) && m.name !== currentUser.name
+      );
+
+      if (filtered.length === 0) {
+        hideMentionDropdown();
+        return;
+      }
+
+      mentionDropdown.innerHTML = filtered.map(m => `
+        <div class="mention-item px-4 py-2 hover:bg-bauhaus-yellow cursor-pointer border-b-2 border-bauhaus-fg last:border-b-0" data-name="${m.name}">
+          <div class="flex items-center gap-2">
+            <div class="w-6 h-6 ${m.type === 'human' ? 'bg-bauhaus-blue' : 'bg-bauhaus-red'} border-2 border-bauhaus-fg rounded-full flex items-center justify-center text-white text-xs font-bold">
+              ${m.name[0].toUpperCase()}
+            </div>
+            <span class="font-medium">${m.name}</span>
+            <span class="text-xs uppercase font-bold ml-auto">${m.type}</span>
+          </div>
+        </div>
+      `).join('');
+
+      // Position dropdown
+      const inputRect = messageInput.getBoundingClientRect();
+      mentionDropdown.style.position = 'fixed';
+      mentionDropdown.style.bottom = inputRect.top - 10 + 'px';
+      mentionDropdown.style.left = inputRect.left + 'px';
+      mentionDropdown.style.width = inputRect.width + 'px';
+      mentionDropdown.classList.remove('hidden');
+
+      // Add click handlers
+      document.querySelectorAll('.mention-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const name = item.dataset.name;
+          const text = messageInput.value;
+          messageInput.value = text.substring(0, mentionStartPos) + '@' + name + ' ' + text.substring(messageInput.selectionStart);
+          hideMentionDropdown();
+          messageInput.focus();
+        });
+      });
+    }
+
+    function hideMentionDropdown() {
+      mentionDropdown.classList.add('hidden');
+    }
+
+    // Render Messages
+    function renderMessages() {
+      messagesContainer.innerHTML = '';
+      messages.forEach(msg => renderMessage(msg, false));
+    }
+
+    function renderMessage(message, animate = false) {
+      const isOwn = message.sender === currentUser.name;
+      const isHuman = message.senderType === 'human';
+
+      // Create message wrapper
+      const messageWrapper = document.createElement('div');
+      messageWrapper.className = `flex ${isOwn ? 'justify-end' : 'justify-start'} ${animate ? 'message-enter' : ''}`;
+
+      // Create message container (flex row for other messages, just bubble for own)
+      const messageContainer = document.createElement('div');
+      messageContainer.className = isOwn ? '' : 'flex items-start gap-3';
+
+      if (!isOwn) {
+        // Add avatar for other people's messages
+        const avatar = document.createElement('div');
+        avatar.className = `w-10 h-10 ${isHuman ? 'bg-bauhaus-blue rounded-full' : 'bg-bauhaus-red'} border-2 border-bauhaus-fg flex items-center justify-center text-white font-black shrink-0`;
+        avatar.textContent = message.sender[0].toUpperCase();
+        messageContainer.appendChild(avatar);
+      }
+
+      // Create bubble content wrapper
+      const bubbleWrapper = document.createElement('div');
+      bubbleWrapper.className = 'flex flex-col gap-1';
+
+      // Create header with sender name and timestamp
+      const headerDiv = document.createElement('div');
+      headerDiv.className = `flex items-center gap-2 px-2 ${isOwn ? 'justify-end' : ''}`;
+
+      const senderSpan = document.createElement('span');
+      senderSpan.className = 'text-xs font-bold text-bauhaus-fg';
+      senderSpan.textContent = message.sender;
+      headerDiv.appendChild(senderSpan);
+
+      if (!isOwn) {
+        // Add type badge for other messages
+        const typeBadge = document.createElement('span');
+        typeBadge.className = `px-1.5 py-0.5 ${isHuman ? 'bg-bauhaus-blue' : 'bg-bauhaus-red'} text-white text-xs font-bold uppercase tracking-widest`;
+        typeBadge.textContent = message.senderType;
+        headerDiv.appendChild(typeBadge);
+      }
+
+      // Add timestamp
+      const timeSpan = document.createElement('span');
+      timeSpan.className = 'text-xs text-bauhaus-fg/50';
+      timeSpan.textContent = formatTime(message.timestamp);
+      headerDiv.appendChild(timeSpan);
+
+      bubbleWrapper.appendChild(headerDiv);
+
+      // Create message bubble
+      const bubbleEl = document.createElement('div');
+      let bubbleClasses = 'message-bubble border-2 border-bauhaus-fg px-4 py-3 cursor-pointer';
+
+      if (isOwn) {
+        bubbleClasses += ` message-own ${isHuman ? 'message-own-human' : 'message-own-agent'}`;
+      } else {
+        bubbleClasses += ` message-other ${isHuman ? 'message-other-human' : 'message-other-agent'}`;
+      }
+
+      bubbleEl.className = bubbleClasses;
+      bubbleEl.onclick = () => setReplyTo(message.id);
+
+      // Add reply context if exists
+      if (message.replyTo) {
+        const replyMsg = messages.find(m => m.id === message.replyTo);
+        if (replyMsg) {
+          const replyDiv = document.createElement('div');
+          replyDiv.className = `mb-2 pl-3 border-l-2 ${isOwn ? 'border-white/50' : (isHuman ? 'border-bauhaus-blue' : 'border-bauhaus-red')} text-xs opacity-75`;
+
+          const replySender = document.createElement('div');
+          replySender.className = 'font-bold';
+          replySender.textContent = replyMsg.sender;
+
+          const replyContent = document.createElement('div');
+          replyContent.className = 'truncate';
+          replyContent.textContent = replyMsg.content;
+
+          replyDiv.appendChild(replySender);
+          replyDiv.appendChild(replyContent);
+          bubbleEl.appendChild(replyDiv);
+        }
+      }
+
+      // Render markdown content
+      const contentDiv = document.createElement('div');
+      contentDiv.className = 'markdown-content';
+      renderMarkdownContent(message.content, contentDiv, isOwn, isHuman);
+      bubbleEl.appendChild(contentDiv);
+
+      bubbleWrapper.appendChild(bubbleEl);
+      messageContainer.appendChild(bubbleWrapper);
+      messageWrapper.appendChild(messageContainer);
+      messagesContainer.appendChild(messageWrapper);
+    }
+
+    // Render markdown content with @mention highlighting
+    function renderMarkdownContent(content, container, isOwn, isHuman) {
+      // Parse markdown to HTML
+      const rawHtml = marked.parse(content);
+
+      // Sanitize HTML
+      const cleanHtml = DOMPurify.sanitize(rawHtml, {
+        ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'u', 's', 'code', 'pre', 'a', 'ul', 'ol', 'li', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'img', 'hr', 'span'],
+        ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class']
+      });
+
+      // Set sanitized HTML
+      container.innerHTML = cleanHtml;
+
+      // Post-process to highlight @mentions
+      highlightMentions(container, isOwn, isHuman);
+    }
+
+    // Highlight @mentions in already-rendered HTML
+    function highlightMentions(container, isOwn, isHuman) {
+      const walker = document.createTreeWalker(
+        container,
+        NodeFilter.SHOW_TEXT,
+        null,
+        false
+      );
+
+      const nodesToReplace = [];
+      let node;
+
+      while (node = walker.nextNode()) {
+        const text = node.textContent;
+        if (text.includes('@')) {
+          nodesToReplace.push(node);
+        }
+      }
+
+      nodesToReplace.forEach(textNode => {
+        const text = textNode.textContent;
+        const mentionRegex = /@(\w+)/g;
+        const parts = [];
+        let lastIndex = 0;
+        let match;
+
+        while ((match = mentionRegex.exec(text)) !== null) {
+          // Add text before mention
+          if (match.index > lastIndex) {
+            parts.push(document.createTextNode(text.substring(lastIndex, match.index)));
+          }
+
+          // Add mention as styled span
+          const mentionSpan = document.createElement('span');
+          mentionSpan.className = 'mention';
+          mentionSpan.textContent = match[0];
+          parts.push(mentionSpan);
+
+          lastIndex = match.index + match[0].length;
+        }
+
+        // Add remaining text
+        if (lastIndex < text.length) {
+          parts.push(document.createTextNode(text.substring(lastIndex)));
+        }
+
+        // Replace text node with parts
+        if (parts.length > 0) {
+          const parent = textNode.parentNode;
+          parts.forEach(part => {
+            parent.insertBefore(part, textNode);
+          });
+          parent.removeChild(textNode);
+        }
+      });
+    }
+
+    function addSystemMessage(text) {
+      const messageEl = document.createElement('div');
+      messageEl.className = 'bg-bauhaus-yellow border-2 border-bauhaus-fg px-4 py-2 text-center font-bold uppercase tracking-wider text-sm message-enter';
+      messageEl.textContent = text;
+      messagesContainer.appendChild(messageEl);
+      scrollToBottom();
+    }
+
+    // Utility Functions
+    function formatTime(timestamp) {
+      const date = new Date(timestamp);
+      const now = new Date();
+      const diff = now - date;
+
+      if (diff < 60000) return 'Just now';
+      if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago';
+      if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago';
+
+      return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function scrollToBottom() {
+      messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    }
+
+    // Enter key on join screen
+    nameInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        joinBtn.click();
+      }
+    });
+
+    // Cleanup on page unload
+    window.addEventListener('beforeunload', () => {
+      if (eventSource) {
+        eventSource.close();
+      }
+    });
+  </script>
+
+</body>
+</html>

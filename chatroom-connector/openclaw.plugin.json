@@ -1,0 +1,15 @@
+{
+  "id": "chatroom-connector",
+  "name": "Chatroom Channel",
+  "version": "0.1.0",
+  "description": "Connect OpenClaw agents to a chatroom server",
+  "author": "Agent Team",
+  "channels": ["chatroom-connector"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": { "type": "boolean", "default": true }
+    }
+  }
+}

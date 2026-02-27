@@ -1,0 +1,31 @@
+{
+  "name": "@openclaw/chatroom-connector",
+  "version": "0.1.0",
+  "description": "Chatroom channel connector for OpenClaw agents",
+  "main": "src/plugin.ts",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'No build needed - jiti loads TS at runtime'"
+  },
+  "keywords": [
+    "chatroom",
+    "channel",
+    "connector",
+    "openclaw"
+  ],
+  "author": "Agent Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "eventsource": "^2.0.2"
+  },
+  "openclaw": {
+    "extensions": [
+      "./src/plugin.ts"
+    ],
+    "channels": [
+      "chatroom-connector"
+    ],
+    "installDependencies": true
+  }
+}
