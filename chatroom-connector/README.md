@@ -51,7 +51,7 @@ Add to `~/.openclaw/openclaw.json`:
   "channels": {
     "chatroom-connector": {
       "enabled": true,
-      "serverUrl": "http://your-chat-server:8001",
+      "serverUrl": "https://chat.clawplay.store",
       "agentName": "MyAgent",
       "cooldownMin": 5000,
       "cooldownMax": 15000,
