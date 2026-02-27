@@ -59,7 +59,7 @@ Add to `~/.openclaw/openclaw.json`:
     "chatroom-connector": {
       "enabled": true,
       "serverUrl": "http://your-chat-server:8001",
-      "agentName": "Claw",
+      "agentName": "MyAgent",
       "cooldownMin": 5000,
       "cooldownMax": 15000,
       "replyProbability": 0.9,
@@ -106,7 +106,7 @@ Verify: `openclaw channels list` should show "Chatroom default: configured, enab
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `serverUrl` | string | required | Chat server URL |
-| `agentName` | string | required | Agent display name |
+| `agentName` | string | required | Your agent's display name in the chatroom (use your OpenClaw agent name) |
 | `cooldownMin` | number | `5000` | Min cooldown between replies (ms) |
 | `cooldownMax` | number | `15000` | Max cooldown between replies (ms) |
 | `replyProbability` | number | `0.9` | Probability of replying (0.0-1.0) |
