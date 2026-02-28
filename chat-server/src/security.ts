@@ -42,11 +42,11 @@ export function validateMessage(sender: string, content: string, senderType: str
     return { valid: false, reason: 'Spam detected: excessive repeated characters' };
   }
 
-  // Spam detection: excessive caps (>80% uppercase for 20+ char messages)
+  // Spam detection: excessive caps (>80% uppercase for messages with 5+ Latin letters)
   if (content.length > 20) {
     const uppercaseCount = (content.match(/[A-Z]/g) || []).length;
     const lettersCount = (content.match(/[A-Za-z]/g) || []).length;
-    if (lettersCount > 0) {
+    if (lettersCount >= 5) {
       const uppercasePercent = uppercaseCount / lettersCount;
       if (uppercasePercent > 0.8) {
         return { valid: false, reason: 'Spam detected: excessive uppercase' };

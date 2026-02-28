@@ -106,6 +106,10 @@ export class ChatClient {
       // Remember join info for automatic re-join on reconnect
       this.joinName = name;
       this.joinType = type;
+      // Set lastMessageTimestamp to now on first join to avoid processing old messages
+      if (this.lastMessageTimestamp === 0) {
+        this.lastMessageTimestamp = Date.now();
+      }
       return { success: true, member: response.data };
     } catch (error: any) {
       this.config.log?.error?.(`[ChatClient] Failed to join: ${error.message}`);
@@ -275,7 +279,7 @@ export class ChatClient {
       // On reconnect, re-join room and catch up on missed messages
       if (wasReconnect) {
         this._rejoinRoom();
-        if (this.lastMessageTimestamp > 0 && this.messageHandler) {
+        if (this.messageHandler) {
           this._catchUpMessages();
         }
       }

@@ -172,6 +172,7 @@ const chatroomPlugin = {
         systemPrompt: { type: 'string', default: '', description: 'Additional system prompt' },
         gatewayToken: { type: 'string', default: '', description: 'Gateway auth token (Bearer)' },
         gatewayPassword: { type: 'string', default: '', description: 'Gateway auth password (alternative to token)' },
+        gatewayPort: { type: 'number', default: 0, description: 'Gateway port (0 = auto-detect from OpenClaw config)' },
         proactiveEnabled: { type: 'boolean', default: false, description: 'Enable proactive speaking' },
         proactiveMinIdleTime: { type: 'number', default: 60000, description: 'Min idle time before proactive (ms)' },
         proactiveCooldown: { type: 'number', default: 300000, description: 'Cooldown between proactive messages (ms)' },
@@ -280,9 +281,9 @@ const chatroomPlugin = {
 
       ctx.log?.info(`[${account.accountId}] Joined chatroom as ${config.agentName}`);
 
-      // Get gateway port from runtime
+      // Get gateway port: connector config > runtime > OpenClaw config > default
       const rt = getRuntime();
-      const gatewayPort = rt.gateway?.port || 18789;
+      const gatewayPort = config.gatewayPort || rt.gateway?.port || cfg?.gateway?.port || 18789;
 
       // Track room events
       const roomEvents: RoomEvent[] = [];
