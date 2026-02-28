@@ -36,6 +36,65 @@ function isConfigured(cfg: ClawdbotConfig): boolean {
   return Boolean(config.serverUrl && config.agentName);
 }
 
+// ============ Chain-of-Thought Filter ============
+
+/**
+ * Filter out LLM chain-of-thought / internal reasoning from responses.
+ * Models sometimes output their reasoning process instead of actual chat replies.
+ */
+function filterChainOfThought(text: string): string {
+  if (!text) return text;
+
+  // Patterns that indicate chain-of-thought / internal reasoning
+  const cotPatterns = [
+    /^I need to (check|think|consider|analyze|look|review|determine|figure|assess|evaluate)/i,
+    /^Let me (check|think|consider|analyze|look|review|determine|figure|assess|evaluate)/i,
+    /^First,?\s+I (need|should|will|must|have) to/i,
+    /^(OK|Okay|Alright|Right),?\s+(so |now |let me |I need|I should)/i,
+    /^(Thinking|Analyzing|Checking|Looking|Reviewing|Considering)/i,
+    /^(Based on|According to) (the|my) (system|instructions|rules|prompt)/i,
+    /^I('ll| will) (start|begin) by/i,
+    /^(Step \d|1\.|First step)/i,
+    /^My (task|role|job|goal) (is|here) to/i,
+    /^As (an AI|a chatroom|the agent)/i,
+  ];
+
+  // Check if the entire response looks like internal reasoning
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // If first line matches a CoT pattern, the response is likely internal reasoning
+  if (lines.length > 0 && cotPatterns.some(p => p.test(lines[0]))) {
+    // Try to extract actual reply after the reasoning
+    // Look for a line that doesn't match CoT patterns (the actual reply)
+    for (let i = 1; i < lines.length; i++) {
+      if (!cotPatterns.some(p => p.test(lines[i])) &&
+          !lines[i].startsWith('-') &&
+          !lines[i].startsWith('*') &&
+          lines[i].length > 5) {
+        return lines.slice(i).join('\n').trim();
+      }
+    }
+    // If all lines are reasoning, skip
+    return '[SKIP]';
+  }
+
+  // Also filter out common reasoning prefixes inline
+  const inlineReasoningPrefixes = [
+    /^(Hmm,?\s+)?I (think|believe|feel like) I should (respond|reply|say|answer)/i,
+    /^I('m| am) going to (respond|reply|say|answer)/i,
+  ];
+
+  for (const pattern of inlineReasoningPrefixes) {
+    if (pattern.test(text)) {
+      const cleaned = text.replace(pattern, '').trim();
+      // Remove leading punctuation
+      return cleaned.replace(/^[.,:;!?\s]+/, '').trim() || '[SKIP]';
+    }
+  }
+
+  return text;
+}
+
 // ============ Gateway Call ============
 
 interface GatewayCallContext {
@@ -77,7 +136,7 @@ async function callGateway(ctx: GatewayCallContext): Promise<string> {
     );
 
     const content = response.data?.choices?.[0]?.message?.content || '';
-    return content.trim();
+    return filterChainOfThought(content.trim());
   } catch (error: any) {
     log?.error?.(`[Chatroom] Gateway call failed: ${error.message}`);
     return '[SKIP]';

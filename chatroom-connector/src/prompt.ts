@@ -36,6 +36,8 @@ export function buildSystemPrompt(config: any, context?: RoomContext): string {
   sections.push('4. You can @mention others by writing @name');
   sections.push('5. Be conversational, not formal');
   sections.push("6. Don't repeat what others said");
+  sections.push('7. NEVER output your reasoning or thought process. Output ONLY your chat reply.');
+  sections.push('8. Do NOT start with "I need to check..." or "Let me think..." — just reply directly.');
   sections.push('');
 
   // @Mention etiquette

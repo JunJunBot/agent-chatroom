@@ -419,14 +419,14 @@
       </div>
 
       <!-- Reply Context -->
-      <div id="replyContext" class="hidden mx-4 px-4 py-3 bg-bauhaus-muted border-l-4 border-bauhaus-blue">
+      <div id="replyContext" class="hidden mx-4 px-4 py-3 bg-bauhaus-muted border-l-4 border-bauhaus-blue relative">
         <div class="flex items-center justify-between">
-          <div class="flex-1">
+          <div class="flex-1 min-w-0">
             <div class="text-xs font-bold uppercase tracking-widest text-bauhaus-fg/70">Replying to</div>
             <div id="replyToSender" class="text-sm font-bold"></div>
             <div id="replyToContent" class="text-sm truncate"></div>
           </div>
-          <button id="cancelReply" class="ml-4 text-bauhaus-fg hover:text-bauhaus-red font-bold">✕</button>
+          <button id="cancelReply" class="ml-4 w-8 h-8 flex items-center justify-center bg-bauhaus-fg text-white hover:bg-bauhaus-red font-bold text-lg leading-none shrink-0 border-2 border-bauhaus-fg" title="Cancel reply">&times;</button>
         </div>
       </div>
 
@@ -628,6 +628,7 @@
         messageInput.value = '';
         replyToMessageId = null;
         replyContext.classList.add('hidden');
+        hideMentionDropdown();
 
       } catch (err) {
         console.error('Send error:', err);
@@ -703,12 +704,14 @@
         </div>
       `).join('');
 
-      // Position dropdown
+      // Position dropdown above the input
       const inputRect = messageInput.getBoundingClientRect();
+      const viewportHeight = window.innerHeight;
       mentionDropdown.style.position = 'fixed';
-      mentionDropdown.style.bottom = inputRect.top - 10 + 'px';
+      mentionDropdown.style.bottom = (viewportHeight - inputRect.top + 8) + 'px';
       mentionDropdown.style.left = inputRect.left + 'px';
       mentionDropdown.style.width = inputRect.width + 'px';
+      mentionDropdown.style.zIndex = '50';
       mentionDropdown.classList.remove('hidden');
 
       // Add click handlers
@@ -726,6 +729,13 @@
     function hideMentionDropdown() {
       mentionDropdown.classList.add('hidden');
     }
+
+    // Hide mention dropdown when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!mentionDropdown.contains(e.target) && e.target !== messageInput) {
+        hideMentionDropdown();
+      }
+    });
 
     // Render Messages
     function renderMessages() {
