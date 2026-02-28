@@ -6,8 +6,15 @@
 
 import axios from 'axios';
 import type { ClawdbotPluginApi, PluginRuntime, ClawdbotConfig } from 'clawdbot/plugin-sdk';
-import { ChatClient, type Message } from './chat-client';
-import { ReplyStrategy } from './strategy';
+import { ChatClient, type Message, type Member } from './chat-client.js';
+import { ReplyStrategy } from './strategy.js';
+import { InputSanitizer, OutputFilter, ChainProtector } from './security.js';
+import { buildRoomContext, type RoomContext, type RoomEvent } from './context.js';
+import { formatChatHistory } from './formatting.js';
+import { buildSystemPrompt } from './prompt.js';
+import { MentionIntelligence } from './mention-intel.js';
+import { compressContext } from './context-compression.js';
+import { ProactiveEngine } from './proactive-engine.js';
 
 // ============ Constants ============
 
@@ -70,6 +77,11 @@ async function callLLM(ctx: LLMCallContext): Promise<string> {
         model,
         messages,
         stream: false,
+        max_tokens: 300,
+        temperature: 0.7,
+        tools: [],
+        tool_choice: 'none',
+        stop: ['[SYSTEM]', '[ADMIN]'],
       },
       { headers, timeout: 60000 },
     );
@@ -80,47 +92,6 @@ async function callLLM(ctx: LLMCallContext): Promise<string> {
     log?.error?.(`[Chatroom] LLM call failed: ${error.message}`);
     return '[SKIP]';
   }
-}
-
-// ============ System Prompt Builder ============
-
-function buildSystemPrompt(config: any): string {
-  const base = `You are "${config.agentName}" in a group chatroom. Other participants include humans and AI agents.
-
-Rules:
-- Keep replies short and natural (1-3 sentences typically)
-- If you have nothing meaningful to add, output exactly [SKIP]
-- You can @mention others by writing @name
-- Be conversational, not formal
-- Don't repeat what others said
-- If someone @mentions you, you should respond
-
-Recent chat history follows.`;
-
-  if (config.systemPrompt) {
-    return `${base}\n\n${config.systemPrompt}`;
-  }
-
-  return base;
-}
-
-// ============ Chat History Formatter ============
-
-function formatChatHistory(history: Message[], trigger: Message): string {
-  const lines: string[] = [];
-
-  for (const msg of history) {
-    const prefix = msg.senderType === 'agent' ? '[Agent]' : '[Human]';
-    lines.push(`${prefix} ${msg.sender}: ${msg.content}`);
-  }
-
-  // Add trigger message if not already in history
-  if (!history.find((m) => m.id === trigger.id)) {
-    const prefix = trigger.senderType === 'agent' ? '[Agent]' : '[Human]';
-    lines.push(`${prefix} ${trigger.sender}: ${trigger.content}`);
-  }
-
-  return lines.join('\n');
 }
 
 // ============ Plugin Definition ============
@@ -155,6 +126,11 @@ const chatroomPlugin = {
         llmBaseUrl: { type: 'string', default: '', description: 'Direct LLM provider URL (e.g., litellm proxy). Bypasses gateway REST.' },
         llmApiKey: { type: 'string', default: '', description: 'API key for direct LLM provider' },
         llmModel: { type: 'string', default: '', description: 'Model ID for direct LLM provider (e.g., claude-sonnet-4-5)' },
+        proactiveEnabled: { type: 'boolean', default: false, description: 'Enable proactive speaking' },
+        proactiveMinIdleTime: { type: 'number', default: 60000, description: 'Min idle time before proactive (ms)' },
+        proactiveCooldown: { type: 'number', default: 300000, description: 'Cooldown between proactive messages (ms)' },
+        contextStrategy: { type: 'string', default: 'hybrid', enum: ['recent', 'important', 'hybrid'], description: 'Context compression strategy' },
+        securityEnabled: { type: 'boolean', default: true, description: 'Enable security filtering' },
       },
       required: ['serverUrl', 'agentName'],
     },
@@ -173,6 +149,11 @@ const chatroomPlugin = {
       llmBaseUrl: { label: 'LLM Provider URL', sensitive: false },
       llmApiKey: { label: 'LLM API Key', sensitive: true },
       llmModel: { label: 'LLM Model ID', sensitive: false },
+      proactiveEnabled: { label: 'Enable Proactive Speaking' },
+      proactiveMinIdleTime: { label: 'Min Idle Time (ms)' },
+      proactiveCooldown: { label: 'Proactive Cooldown (ms)' },
+      contextStrategy: { label: 'Context Strategy' },
+      securityEnabled: { label: 'Enable Security' },
     },
   },
   config: {
@@ -224,6 +205,11 @@ const chatroomPlugin = {
 
       ctx.log?.info(`[${account.accountId}] Starting chatroom connector for ${config.agentName}...`);
 
+      // Create security modules
+      const inputSanitizer = new InputSanitizer();
+      const outputFilter = new OutputFilter();
+      const chainProtector = new ChainProtector();
+
       // Create chat client
       const chatClient = new ChatClient({
         serverUrl: config.serverUrl,
@@ -240,6 +226,9 @@ const chatroomPlugin = {
         cooldownMax: config.cooldownMax ?? 15000,
       });
 
+      // Create mention intelligence
+      const mentionIntel = new MentionIntelligence(config.agentName);
+
       // Join the room
       const joinResult = await chatClient.join(config.agentName, 'agent');
       if (!joinResult.success) {
@@ -252,7 +241,58 @@ const chatroomPlugin = {
       const rt = getRuntime();
       const gatewayPort = rt.gateway?.port || 18789;
 
+      // Track room events
+      const roomEvents: RoomEvent[] = [];
+
       let stopped = false;
+      let proactiveEngine: ProactiveEngine | null = null;
+
+      // Helper: Build context
+      const buildContext = async (): Promise<RoomContext> => {
+        const members = await chatClient.getMembers();
+        const messages = await chatClient.getMessages({ limit: config.maxContextMessages ?? 20 });
+        return buildRoomContext(config.agentName, members, messages, roomEvents);
+      };
+
+      // Helper: Generate topic for proactive speaking
+      const generateTopic = async (): Promise<string> => {
+        const systemPrompt = 'Generate a casual, interesting topic to discuss in a chatroom. Be creative and relevant. Output only the topic text, nothing else.';
+        const messages = [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: 'Generate a topic' },
+        ];
+
+        return callLLM({
+          messages,
+          llmBaseUrl: config.llmBaseUrl,
+          llmApiKey: config.llmApiKey,
+          llmModel: config.llmModel,
+          gatewayPort,
+          gatewayToken: config.gatewayToken,
+          gatewayPassword: config.gatewayPassword,
+          log: ctx.log,
+        });
+      };
+
+      // Start proactive engine if enabled
+      if (config.proactiveEnabled) {
+        proactiveEngine = new ProactiveEngine({
+          serverUrl: config.serverUrl,
+          agentName: config.agentName,
+          checkInterval: 30000,
+          minIdleTime: config.proactiveMinIdleTime ?? 60000,
+          cooldown: config.proactiveCooldown ?? 300000,
+          maxDailyPerAgent: 20,
+          maxDailyGlobal: 50,
+          enabled: true,
+          onSpeak: async (content: string) => {
+            await chatClient.sendMessage(config.agentName, content);
+          },
+          onGenerateTopic: generateTopic,
+          log: ctx.log,
+        });
+        proactiveEngine.start();
+      }
 
       // Connect to SSE stream
       chatClient.connectSSE(
@@ -265,7 +305,7 @@ const chatroomPlugin = {
             return;
           }
 
-          // Decide if should reply
+          // Decide if should reply (basic strategy)
           if (!strategy.shouldReply(msg)) {
             const cooldown = strategy.getCooldownRemaining();
             if (cooldown > 0) {
@@ -276,17 +316,49 @@ const chatroomPlugin = {
             return;
           }
 
-          ctx.log?.info?.(`[Chatroom] Processing message, will reply...`);
+          // Build room context
+          const roomContext = await buildContext();
+
+          // Get recent messages for mention intelligence
+          const allMessages = await chatClient.getMessages({ limit: 50 });
+
+          // Check mention intelligence
+          const mentionDecision = mentionIntel.shouldRespond(msg, roomContext, allMessages);
+          if (!mentionDecision.respond) {
+            ctx.log?.info?.(`[Chatroom] Skipped reply (${mentionDecision.reason})`);
+            return;
+          }
+
+          ctx.log?.info?.(`[Chatroom] Processing message, will reply (${mentionDecision.reason})...`);
 
           try {
-            // Get recent chat history
-            const history = await chatClient.getMessages({
+            // Get chat history
+            let history = await chatClient.getMessages({
               limit: config.maxContextMessages ?? 20,
             });
 
-            // Build system prompt and messages
-            const systemPrompt = buildSystemPrompt(config);
-            const userContent = formatChatHistory(history, msg);
+            // Sanitize input if security enabled
+            let sanitizedContent = msg.content;
+            if (config.securityEnabled !== false) {
+              const sanitizeResult = inputSanitizer.sanitize(msg.content);
+              sanitizedContent = sanitizeResult.sanitized;
+              if (!sanitizeResult.safe) {
+                ctx.log?.warn?.(`[Chatroom] Input threats detected: ${sanitizeResult.threats.join(', ')}`);
+              }
+            }
+
+            // Compress context
+            const compressed = compressContext(history, msg, {
+              strategy: config.contextStrategy || 'hybrid',
+              maxTokens: 2000,
+              agentName: config.agentName,
+            });
+
+            // Build enhanced system prompt
+            const systemPrompt = buildSystemPrompt(config, roomContext);
+
+            // Format chat history with context
+            const userContent = formatChatHistory(compressed, { ...msg, content: sanitizedContent }, roomContext);
 
             const messages = [
               { role: 'system', content: systemPrompt },
@@ -294,7 +366,7 @@ const chatroomPlugin = {
             ];
 
             // Call LLM (direct provider or gateway)
-            const reply = await callLLM({
+            let reply = await callLLM({
               messages,
               llmBaseUrl: config.llmBaseUrl,
               llmApiKey: config.llmApiKey,
@@ -305,21 +377,36 @@ const chatroomPlugin = {
               log: ctx.log,
             });
 
+            // Filter output if security enabled
+            if (config.securityEnabled !== false) {
+              const filterResult = outputFilter.filter(reply);
+              if (!filterResult.safe) {
+                ctx.log?.warn?.(`[Chatroom] Output violations detected: ${filterResult.violations.join(', ')}`);
+              }
+              reply = filterResult.filtered;
+            }
+
             ctx.log?.info?.(`[Chatroom] Gateway reply: ${reply.substring(0, 100)}...`);
 
             // Send reply if not [SKIP]
             if (!reply.includes('[SKIP]')) {
+              const isMentionReply = mentionDecision.reason === 'directly_mentioned';
               const sendResult = await chatClient.sendMessage(
                 config.agentName,
                 reply,
-                msg.id,
+                mentionDecision.replyTo || msg.id,
+                isMentionReply,
               );
 
               if (sendResult.success) {
                 ctx.log?.info?.(`[Chatroom] Reply sent successfully`);
                 strategy.startCooldown();
+                strategy.resetBackoff();
               } else {
                 ctx.log?.error?.(`[Chatroom] Failed to send reply: ${sendResult.error}`);
+                if (sendResult.error?.includes('429')) {
+                  strategy.recordRateLimit();
+                }
               }
             } else {
               ctx.log?.info?.(`[Chatroom] Agent decided to skip reply`);
@@ -330,36 +417,41 @@ const chatroomPlugin = {
         },
         (data) => {
           ctx.log?.info?.(`[Chatroom] User joined: ${data.name}`);
+          roomEvents.push({
+            type: 'join',
+            name: data.name,
+            timestamp: Date.now(),
+          });
         },
         (data) => {
           ctx.log?.info?.(`[Chatroom] User left: ${data.name}`);
+          roomEvents.push({
+            type: 'leave',
+            name: data.name,
+            timestamp: Date.now(),
+          });
         },
       );
 
       // Record channel activity start
       rt.channel.activity.record('chatroom-connector', account.accountId, 'start');
 
-      // Handle abort signal
-      abortSignal?.addEventListener('abort', () => {
-        if (stopped) return;
-        stopped = true;
-        ctx.log?.info(`[${account.accountId}] Stopping chatroom connector...`);
-        chatClient.close();
-        rt.channel.activity.record('chatroom-connector', account.accountId, 'stop');
-      });
-
       ctx.log?.info(`[${account.accountId}] Chatroom connector started successfully`);
 
-      // Return stop handler
-      return {
-        stop: () => {
+      // Return a Promise that only resolves on abort (prevents framework auto-restart)
+      return new Promise<void>((resolve) => {
+        abortSignal?.addEventListener('abort', () => {
           if (stopped) return;
           stopped = true;
-          ctx.log?.info(`[${account.accountId}] Chatroom Channel stopped`);
+          ctx.log?.info(`[${account.accountId}] Stopping chatroom connector...`);
           chatClient.close();
+          if (proactiveEngine) {
+            proactiveEngine.stop();
+          }
           rt.channel.activity.record('chatroom-connector', account.accountId, 'stop');
-        },
-      };
+          resolve();
+        });
+      });
     },
   },
   status: {
@@ -413,4 +505,3 @@ const plugin = {
 };
 
 export default plugin;
-

@@ -44,6 +44,21 @@ class SSEManager {
     this.broadcast('leave', { name });
   }
 
+  // Broadcast mute event
+  broadcastMute(name: string, duration: number): void {
+    this.broadcast('mute', { name, duration });
+  }
+
+  // Broadcast kick event
+  broadcastKick(name: string): void {
+    this.broadcast('kick', { name });
+  }
+
+  // Broadcast generic event
+  broadcastEvent(eventType: string, data: any): void {
+    this.broadcast(eventType, data);
+  }
+
   // Generic broadcast method
   private broadcast(event: string, data: any): void {
     const payload = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;

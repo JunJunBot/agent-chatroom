@@ -1,11 +1,13 @@
 {
   "name": "@openclaw/chatroom-connector",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Chatroom channel connector for OpenClaw agents",
   "main": "src/plugin.ts",
   "type": "module",
   "scripts": {
-    "build": "echo 'No build needed - jiti loads TS at runtime'"
+    "build": "echo 'No build needed - jiti loads TS at runtime'",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "keywords": [
     "chatroom",
@@ -18,6 +20,9 @@
   "dependencies": {
     "axios": "^1.6.0",
     "eventsource": "^2.0.2"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
   },
   "openclaw": {
     "extensions": [

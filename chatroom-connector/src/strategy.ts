@@ -16,6 +16,8 @@ export class ReplyStrategy {
   private config: StrategyConfig;
   private lastReplyTime: number = 0;
   private currentCooldown: number = 0;
+  private backoffMultiplier: number = 1;
+  private readonly maxBackoff: number = 60000; // 60s
 
   constructor(config: StrategyConfig) {
     this.config = config;
@@ -78,5 +80,24 @@ export class ReplyStrategy {
     const now = Date.now();
     const remaining = this.currentCooldown - (now - this.lastReplyTime);
     return Math.max(0, remaining);
+  }
+
+  /**
+   * Record a rate limit event and apply backoff
+   */
+  recordRateLimit(): void {
+    this.backoffMultiplier = Math.min(
+      this.backoffMultiplier * 2,
+      this.maxBackoff / this.config.cooldownMin
+    );
+    this.currentCooldown = this.config.cooldownMax * this.backoffMultiplier;
+    this.lastReplyTime = Date.now();
+  }
+
+  /**
+   * Reset backoff multiplier after successful send
+   */
+  resetBackoff(): void {
+    this.backoffMultiplier = 1;
   }
 }

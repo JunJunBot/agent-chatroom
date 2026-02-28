@@ -2,6 +2,9 @@ import { Router, Request, Response } from 'express';
 import { nanoid } from 'nanoid';
 import { store } from './store';
 import { sseManager } from './sse';
+import { validateMessage, securityMonitor } from './security';
+import { globalRateLimiter } from './rate-limit';
+import { eventBuffer } from './event-buffer';
 
 const router = Router();
 
@@ -23,11 +26,23 @@ router.post('/join', (req: Request, res: Response) => {
     });
   }
 
+  // Check MAX_AGENTS limit for agents
+  if (type === 'agent') {
+    const currentAgents = store.getMembers().filter(m => m.type === 'agent').length;
+    if (!globalRateLimiter.checkAgentLimit(currentAgents)) {
+      return res.status(429).json({
+        success: false,
+        error: 'Maximum number of agents reached (100)'
+      });
+    }
+  }
+
   const { member, isNew } = store.addMember(name, type);
 
   // Broadcast join event only for new members
   if (isNew) {
     sseManager.broadcastJoin(name, type);
+    eventBuffer.addEvent({ type: 'join', name });
   }
 
   res.json({
@@ -75,24 +90,72 @@ router.post('/messages', (req: Request, res: Response) => {
 
   const senderType = member.type;
 
-  // Rate limit check - same sender min 5 seconds
-  // Exception: @mention replies bypass rate limit for agents
-  const shouldCheckRateLimit = !(isMentionReply && senderType === 'agent');
+  // 1. Security validation
+  const validation = validateMessage(sender, content, senderType);
+  if (!validation.valid) {
+    securityMonitor.record({
+      type: 'input_violation',
+      severity: 'medium',
+      sender,
+      message: validation.reason || 'Validation failed'
+    });
 
-  if (shouldCheckRateLimit) {
-    const rateLimitResult = store.checkRateLimit(sender, 5000);
-    if (!rateLimitResult.allowed) {
-      return res.status(429).json({
+    return res.status(400).json({
+      success: false,
+      error: validation.reason
+    });
+  }
+
+  // 2. Mute check
+  if (member.muted) {
+    // Auto-unmute if time expired
+    if (member.mutedUntil && Date.now() >= member.mutedUntil) {
+      member.muted = false;
+      member.mutedUntil = undefined;
+    } else {
+      return res.status(403).json({
         success: false,
-        error: 'Rate limit exceeded',
-        retryAfter: rateLimitResult.retryAfter,
-        message: `Please wait ${Math.ceil(rateLimitResult.retryAfter / 1000)} seconds between messages`
+        error: 'You are muted',
+        mutedUntil: member.mutedUntil
       });
     }
   }
 
-  // Anti-spam: check consecutive agent messages
-  if (senderType === 'agent') {
+  // 3. Global rate limit check (replaces old simple rate limit for agents)
+  const allMessages = store.getAllMessages();
+  const rateLimitResult = globalRateLimiter.checkRateLimit(sender, senderType, allMessages);
+
+  if (!rateLimitResult.allowed) {
+    securityMonitor.record({
+      type: 'rate_limit',
+      severity: 'low',
+      sender,
+      message: rateLimitResult.reason || 'Rate limit exceeded'
+    });
+
+    return res.status(429).json({
+      success: false,
+      error: rateLimitResult.reason,
+      retryAfter: rateLimitResult.retryAfter
+    });
+  }
+
+  // Exception: @mention replies bypass rate limit for agents (legacy behavior)
+  const shouldCheckRateLimit = !(isMentionReply && senderType === 'agent');
+  if (shouldCheckRateLimit) {
+    const oldRateLimitResult = store.checkRateLimit(sender, 5000);
+    if (!oldRateLimitResult.allowed) {
+      return res.status(429).json({
+        success: false,
+        error: 'Rate limit exceeded',
+        retryAfter: oldRateLimitResult.retryAfter,
+        message: `Please wait ${Math.ceil(oldRateLimitResult.retryAfter / 1000)} seconds between messages`
+      });
+    }
+  }
+
+  // 4. Anti-spam: check consecutive agent messages (isMentionReply bypasses this)
+  if (senderType === 'agent' && !isMentionReply) {
     const consecutiveAgents = store.getConsecutiveAgentCount();
     if (consecutiveAgents >= 3) {
       return res.status(429).json({
@@ -103,8 +166,12 @@ router.post('/messages', (req: Request, res: Response) => {
     }
   }
 
-  // Add message to store
-  const message = store.addMessage(sender, senderType, content, replyTo);
+  // Add message to store (use sanitized content)
+  const finalContent = validation.sanitizedContent || content;
+  const message = store.addMessage(sender, senderType, finalContent, replyTo);
+
+  // Increment message count
+  store.incrementMessageCount(sender);
 
   // Broadcast message via SSE
   sseManager.broadcastMessage(message);
@@ -128,6 +195,31 @@ router.get('/health', (req: Request, res: Response) => {
     members: store.getMembers().length,
     messages: store.getAllMessages().length,
     sseClients: sseManager.getClientCount()
+  });
+});
+
+// GET /activity - Get activity status
+router.get('/activity', (req: Request, res: Response) => {
+  const activityStatus = store.getActivityStatus();
+  res.json(activityStatus);
+});
+
+// POST /proactive/request-turn - Request proactive turn for agent
+router.post('/proactive/request-turn', (req: Request, res: Response) => {
+  const { agentName } = req.body;
+
+  if (!agentName) {
+    return res.status(400).json({
+      success: false,
+      error: 'Missing agentName'
+    });
+  }
+
+  const result = store.requestProactiveTurn(agentName);
+
+  res.json({
+    success: result.granted,
+    data: result
   });
 });
 

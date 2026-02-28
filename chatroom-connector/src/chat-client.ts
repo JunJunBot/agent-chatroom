@@ -145,19 +145,48 @@ export class ChatClient {
     sender: string,
     content: string,
     replyTo?: string,
+    isMentionReply?: boolean,
   ): Promise<MessageResponse> {
-    try {
-      const response = await axios.post(`${this.config.serverUrl}/messages`, {
-        sender,
-        content,
-        replyTo,
-      });
-      this.config.log?.info?.(`[ChatClient] Message sent: ${content.substring(0, 50)}...`);
-      return { success: true, message: response.data };
-    } catch (error: any) {
-      this.config.log?.error?.(`[ChatClient] Failed to send message: ${error.message}`);
-      return { success: false, error: error.message };
-    }
+    const sendRequest = async () => {
+      try {
+        const response = await axios.post(`${this.config.serverUrl}/messages`, {
+          sender,
+          content,
+          replyTo,
+          isMentionReply,
+        });
+        this.config.log?.info?.(`[ChatClient] Message sent: ${content.substring(0, 50)}...`);
+        return { success: true, message: response.data };
+      } catch (error: any) {
+        // Handle 429 rate limit
+        if (error.response?.status === 429) {
+          const retryAfter = error.response?.data?.retryAfter || 5000;
+          this.config.log?.warn?.(`[ChatClient] Rate limited, retrying after ${retryAfter}ms`);
+
+          // Wait and retry once
+          await new Promise(resolve => setTimeout(resolve, retryAfter));
+
+          try {
+            const retryResponse = await axios.post(`${this.config.serverUrl}/messages`, {
+              sender,
+              content,
+              replyTo,
+              isMentionReply,
+            });
+            this.config.log?.info?.(`[ChatClient] Message sent (retry): ${content.substring(0, 50)}...`);
+            return { success: true, message: retryResponse.data };
+          } catch (retryError: any) {
+            this.config.log?.error?.(`[ChatClient] Retry failed: ${retryError.message}`);
+            return { success: false, error: retryError.message };
+          }
+        }
+
+        this.config.log?.error?.(`[ChatClient] Failed to send message: ${error.message}`);
+        return { success: false, error: error.message };
+      }
+    };
+
+    return sendRequest();
   }
 
   /**
@@ -287,6 +316,51 @@ export class ChatClient {
     if (this.eventSource) {
       this.eventSource.close();
       this.config.log?.info?.('[ChatClient] SSE connection closed');
+    }
+  }
+
+  /**
+   * Get activity status from server
+   */
+  async getActivityStatus(): Promise<{
+    isIdle: boolean;
+    lastMessageTime: number;
+    activeMembers: string[];
+    messageCount: number;
+  }> {
+    try {
+      const response = await axios.get(`${this.config.serverUrl}/activity`, {
+        timeout: 5000,
+      });
+      return response.data;
+    } catch (error: any) {
+      this.config.log?.error?.(`[ChatClient] Failed to get activity: ${error.message}`);
+      return {
+        isIdle: false,
+        lastMessageTime: Date.now(),
+        activeMembers: [],
+        messageCount: 0,
+      };
+    }
+  }
+
+  /**
+   * Request proactive turn from server
+   */
+  async requestProactiveTurn(agentName: string): Promise<{
+    granted: boolean;
+    lockUntil?: number;
+  }> {
+    try {
+      const response = await axios.post(
+        `${this.config.serverUrl}/proactive/request-turn`,
+        { agentName },
+        { timeout: 5000 }
+      );
+      return response.data;
+    } catch (error: any) {
+      this.config.log?.error?.(`[ChatClient] Failed to request turn: ${error.message}`);
+      return { granted: false };
     }
   }
 }

@@ -8,6 +8,10 @@ export interface Message {
   mentions: string[];
   replyTo?: string;
   timestamp: number;
+  deleted?: boolean;
+  importance?: number;
+  isProactive?: boolean;
+  eventType?: string;
 }
 
 export interface Member {
@@ -16,12 +20,17 @@ export interface Member {
   type: 'human' | 'agent';
   joinedAt: number;
   lastActiveAt: number;
+  role?: 'user' | 'admin';
+  muted?: boolean;
+  mutedUntil?: number;
+  messageCount?: number;
 }
 
 class Store {
   private messages: Message[] = [];
   private members: Map<string, Member> = new Map();
   private lastMessageTime: Map<string, number> = new Map();
+  private proactiveLock: { agent: string; until: number } | null = null;
 
   // Add a member
   addMember(name: string, type: 'human' | 'agent'): { member: Member; isNew: boolean } {
@@ -127,6 +136,96 @@ class Store {
     }
 
     return mentions;
+  }
+
+  // Get member by name
+  getMemberByName(name: string): Member | undefined {
+    return Array.from(this.members.values()).find(m => m.name === name);
+  }
+
+  // Delete member by name
+  deleteMember(name: string): boolean {
+    const member = this.getMemberByName(name);
+    if (!member) {
+      return false;
+    }
+    this.members.delete(member.id);
+    return true;
+  }
+
+  // Get activity status
+  getActivityStatus(): { isIdle: boolean; lastMessageTime: number; activeMembers: string[]; messageCount: number } {
+    const now = Date.now();
+    const lastMessage = this.messages.length > 0 ? this.messages[this.messages.length - 1] : null;
+    const lastMessageTime = lastMessage ? lastMessage.timestamp : 0;
+    const isIdle = lastMessage ? (now - lastMessage.timestamp) > 60000 : true;
+
+    // Members who sent messages in last 5 minutes
+    const fiveMinutesAgo = now - 5 * 60 * 1000;
+    const recentSenders = new Set<string>();
+    for (let i = this.messages.length - 1; i >= 0; i--) {
+      if (this.messages[i].timestamp < fiveMinutesAgo) {
+        break;
+      }
+      recentSenders.add(this.messages[i].sender);
+    }
+
+    return {
+      isIdle,
+      lastMessageTime,
+      activeMembers: Array.from(recentSenders),
+      messageCount: this.messages.length
+    };
+  }
+
+  // Request proactive turn for agent
+  requestProactiveTurn(agentName: string): { granted: boolean; lockUntil?: number } {
+    const now = Date.now();
+
+    // Check if there's an active lock
+    if (this.proactiveLock && this.proactiveLock.until > now) {
+      return { granted: false };
+    }
+
+    // Grant lock for 30 seconds
+    const lockUntil = now + 30000;
+    this.proactiveLock = { agent: agentName, until: lockUntil };
+
+    return { granted: true, lockUntil };
+  }
+
+  // Get message by ID
+  getMessageById(id: string): Message | undefined {
+    return this.messages.find(m => m.id === id);
+  }
+
+  // Increment message count for member
+  incrementMessageCount(name: string): void {
+    const member = this.getMemberByName(name);
+    if (member) {
+      member.messageCount = (member.messageCount || 0) + 1;
+    }
+  }
+
+  // Clean up inactive members (no activity in last N ms)
+  cleanupInactiveMembers(maxInactiveMs: number = 30 * 60 * 1000): string[] {
+    const now = Date.now();
+    const removed: string[] = [];
+    for (const [id, member] of this.members.entries()) {
+      if (now - member.lastActiveAt > maxInactiveMs) {
+        this.members.delete(id);
+        removed.push(member.name);
+      }
+    }
+    return removed;
+  }
+
+  // Reset store state (for testing)
+  reset(): void {
+    this.messages = [];
+    this.members = new Map();
+    this.lastMessageTime = new Map();
+    this.proactiveLock = null;
   }
 }
 
