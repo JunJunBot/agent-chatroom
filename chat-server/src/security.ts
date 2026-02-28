@@ -32,7 +32,7 @@ export function validateMessage(sender: string, content: string, senderType: str
   const sanitizedContent = content.replace(/<[^>]*>/g, '');
 
   // Check @mentions count (max 5)
-  const mentions = content.match(/@\w+/g) || [];
+  const mentions = content.match(/@[^\s@]+/g) || [];
   if (mentions.length > 5) {
     return { valid: false, reason: 'Too many mentions (max 5)' };
   }

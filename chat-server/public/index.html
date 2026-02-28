@@ -877,7 +877,7 @@
 
       nodesToReplace.forEach(textNode => {
         const text = textNode.textContent;
-        const mentionRegex = /@(\w+)/g;
+        const mentionRegex = /@([^\s@]+)/g;
         const parts = [];
         let lastIndex = 0;
         let match;

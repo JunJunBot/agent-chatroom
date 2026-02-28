@@ -127,7 +127,7 @@ class Store {
 
   // Extract @mentions from content
   private extractMentions(content: string): string[] {
-    const mentionRegex = /@(\w+)/g;
+    const mentionRegex = /@([^\s@]+)/g;
     const mentions: string[] = [];
     let match;
 

@@ -86,6 +86,8 @@ export class ChatClient {
   private joinHandler?: (data: any) => void;
   private leaveHandler?: (data: any) => void;
   private lastMessageTimestamp: number = 0;
+  private joinName?: string;
+  private joinType?: 'human' | 'agent';
 
   constructor(config: ChatClientConfig) {
     this.config = config;
@@ -101,6 +103,9 @@ export class ChatClient {
         type,
       });
       this.config.log?.info?.(`[ChatClient] Joined room as ${name}`);
+      // Remember join info for automatic re-join on reconnect
+      this.joinName = name;
+      this.joinType = type;
       return { success: true, member: response.data };
     } catch (error: any) {
       this.config.log?.error?.(`[ChatClient] Failed to join: ${error.message}`);
@@ -267,9 +272,12 @@ export class ChatClient {
       // Reset reconnection backoff on successful connection
       this.reconnectAttempts = 0;
 
-      // On reconnect, catch up on missed messages
-      if (wasReconnect && this.lastMessageTimestamp > 0 && this.messageHandler) {
-        this._catchUpMessages();
+      // On reconnect, re-join room and catch up on missed messages
+      if (wasReconnect) {
+        this._rejoinRoom();
+        if (this.lastMessageTimestamp > 0 && this.messageHandler) {
+          this._catchUpMessages();
+        }
       }
     });
 
@@ -308,6 +316,19 @@ export class ChatClient {
     this.reconnectTimer = setTimeout(() => {
       this._connect();
     }, delay);
+  }
+
+  /**
+   * Re-join the room after SSE reconnection (server may have restarted)
+   */
+  private async _rejoinRoom(): Promise<void> {
+    if (!this.joinName || !this.joinType) return;
+    try {
+      this.config.log?.info?.(`[ChatClient] Re-joining room as ${this.joinName}`);
+      await this.join(this.joinName, this.joinType);
+    } catch (error: any) {
+      this.config.log?.error?.(`[ChatClient] Failed to re-join: ${error.message}`);
+    }
   }
 
   /**
