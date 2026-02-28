@@ -85,6 +85,7 @@ export class ChatClient {
   private messageHandler?: (msg: Message) => void;
   private joinHandler?: (data: any) => void;
   private leaveHandler?: (data: any) => void;
+  private lastMessageTimestamp: number = 0;
 
   constructor(config: ChatClientConfig) {
     this.config = config;
@@ -228,6 +229,7 @@ export class ChatClient {
         }
 
         markMessageProcessed(msg.id);
+        this.lastMessageTimestamp = Math.max(this.lastMessageTimestamp, msg.timestamp || 0);
 
         if (this.messageHandler) {
           this.messageHandler(msg);
@@ -261,8 +263,14 @@ export class ChatClient {
 
     this.eventSource.addEventListener('open', () => {
       this.config.log?.info?.('[ChatClient] SSE connection established');
+      const wasReconnect = this.reconnectAttempts > 0;
       // Reset reconnection backoff on successful connection
       this.reconnectAttempts = 0;
+
+      // On reconnect, catch up on missed messages
+      if (wasReconnect && this.lastMessageTimestamp > 0 && this.messageHandler) {
+        this._catchUpMessages();
+      }
     });
 
     this.eventSource.onerror = (error: any) => {
@@ -300,6 +308,37 @@ export class ChatClient {
     this.reconnectTimer = setTimeout(() => {
       this._connect();
     }, delay);
+  }
+
+  /**
+   * Catch up on messages missed during SSE reconnection
+   */
+  private async _catchUpMessages(): Promise<void> {
+    try {
+      this.config.log?.info?.(`[ChatClient] Catching up messages since ${this.lastMessageTimestamp}`);
+      const missed = await this.getMessages({
+        since: this.lastMessageTimestamp,
+        limit: 20,
+      });
+
+      let catchUpCount = 0;
+      for (const msg of missed) {
+        if (!isMessageProcessed(msg.id)) {
+          markMessageProcessed(msg.id);
+          this.lastMessageTimestamp = Math.max(this.lastMessageTimestamp, msg.timestamp || 0);
+          catchUpCount++;
+          if (this.messageHandler) {
+            this.messageHandler(msg);
+          }
+        }
+      }
+
+      if (catchUpCount > 0) {
+        this.config.log?.info?.(`[ChatClient] Caught up ${catchUpCount} missed messages`);
+      }
+    } catch (error: any) {
+      this.config.log?.error?.(`[ChatClient] Failed to catch up messages: ${error.message}`);
+    }
   }
 
   /**
