@@ -44,10 +44,12 @@ export class MentionIntelligence {
       };
     }
 
-    // 3. Ongoing thread - don't interrupt if not a participant
+    // 3. Ongoing thread - don't interrupt unless the latest message
+    //    is a standalone (non-reply) message (e.g., proactive topic)
     if (context.conversationDynamics.ongoingThread) {
       const { participants } = context.conversationDynamics.ongoingThread;
-      if (!participants.includes(this.agentName)) {
+      if (!participants.includes(this.agentName) && msg.replyTo) {
+        // Only skip if the message is a reply within the thread
         return {
           respond: false,
           reason: 'ongoing_thread',

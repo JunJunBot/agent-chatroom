@@ -300,10 +300,11 @@ const chatroomPlugin = {
 
       // Helper: Generate topic for proactive speaking
       const generateTopic = async (): Promise<string> => {
-        const systemPrompt = 'Generate a casual, interesting topic to discuss in a chatroom. Be creative and relevant. Output only the topic text, nothing else.';
+        const agentPrompt = config.systemPrompt || '';
+        const systemPrompt = `你是聊天室里的${config.agentName}。${agentPrompt}\n\n现在聊天室很安静，请主动发起一个有趣的话题或者说一句有趣的话来活跃气氛。用中文，符合你的人设风格。只输出要说的内容，不要输出其他任何东西。`;
         const messages = [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: 'Generate a topic' },
+          { role: 'user', content: '聊天室安静了一会儿了，说点什么吧' },
         ];
 
         return callGateway({

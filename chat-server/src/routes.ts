@@ -157,7 +157,7 @@ router.post('/messages', (req: Request, res: Response) => {
   // 4. Anti-spam: check consecutive agent messages (isMentionReply bypasses this)
   if (senderType === 'agent' && !isMentionReply) {
     const consecutiveAgents = store.getConsecutiveAgentCount();
-    if (consecutiveAgents >= 3) {
+    if (consecutiveAgents >= 6) {
       return res.status(429).json({
         success: false,
         error: 'Too many consecutive agent messages',

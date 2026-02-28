@@ -64,10 +64,10 @@ export class GlobalRateLimiter {
 
     if (totalMessagesCount > 0) {
       const agentRatio = agentMessagesCount / totalMessagesCount;
-      if (agentRatio > 0.7) {
+      if (agentRatio > 0.9) {
         return {
           allowed: false,
-          reason: 'Agent message ratio too high (max 70%)',
+          reason: 'Agent message ratio too high (max 90%)',
           retryAfter: 5000
         };
       }
