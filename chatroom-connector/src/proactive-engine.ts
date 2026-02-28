@@ -85,7 +85,7 @@ export class ProactiveEngine {
 
     // Check daily limit
     if (this.dailyCount >= this.config.maxDailyPerAgent!) {
-      this.config.log?.debug?.('[ProactiveEngine] Daily limit reached, skipping');
+      this.config.log?.info?.('[ProactiveEngine] Daily limit reached, skipping');
       return;
     }
 
@@ -93,19 +93,19 @@ export class ProactiveEngine {
     const currentCooldown = this.getCurrentCooldown();
     const timeSinceLastProactive = Date.now() - this.lastProactiveTime;
     if (timeSinceLastProactive < currentCooldown) {
-      this.config.log?.debug?.(
-        `[ProactiveEngine] In cooldown, ${Math.round((currentCooldown - timeSinceLastProactive) / 1000)}s remaining`
-      );
-      return;
+      return; // Silent skip during cooldown (too frequent to log)
     }
+
+    this.config.log?.info?.('[ProactiveEngine] Checking room activity...');
 
     // Check if room is idle
     try {
       const activity = await this.fetchActivity();
       if (!activity.isIdle) {
-        this.config.log?.debug?.('[ProactiveEngine] Room is not idle, skipping');
+        this.config.log?.info?.('[ProactiveEngine] Room is active, skipping');
         return;
       }
+      this.config.log?.info?.('[ProactiveEngine] Room is idle, requesting turn...');
     } catch (err: any) {
       this.config.log?.error?.(`[ProactiveEngine] Failed to fetch activity: ${err.message}`);
       return;
@@ -114,8 +114,8 @@ export class ProactiveEngine {
     // Request turn
     try {
       const turnResult = await this.requestTurn();
+      this.config.log?.info?.(`[ProactiveEngine] Turn result: granted=${turnResult.granted}`);
       if (!turnResult.granted) {
-        this.config.log?.debug?.('[ProactiveEngine] Turn not granted, skipping');
         return;
       }
     } catch (err: any) {
@@ -163,7 +163,8 @@ export class ProactiveEngine {
       { agentName: this.config.agentName },
       { timeout: 5000 }
     );
-    return response.data;
+    // Server wraps result in { success, data: { granted, lockUntil } }
+    return response.data?.data || response.data;
   }
 
   /**
