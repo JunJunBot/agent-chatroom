@@ -38,43 +38,33 @@ function isConfigured(cfg: ClawdbotConfig): boolean {
 
 // ============ Gateway Call ============
 
-interface LLMCallContext {
+interface GatewayCallContext {
   messages: any[];
-  llmBaseUrl?: string;
-  llmApiKey?: string;
-  llmModel?: string;
   gatewayPort: number;
   gatewayToken?: string;
   gatewayPassword?: string;
   log?: any;
 }
 
-async function callLLM(ctx: LLMCallContext): Promise<string> {
-  const { messages, llmBaseUrl, llmApiKey, llmModel, gatewayPort, gatewayToken, gatewayPassword, log } = ctx;
+async function callGateway(ctx: GatewayCallContext): Promise<string> {
+  const { messages, gatewayPort, gatewayToken, gatewayPassword, log } = ctx;
 
-  // Determine URL: prefer direct LLM provider, fallback to gateway
-  const url = llmBaseUrl
-    ? `${llmBaseUrl.replace(/\/+$/, '')}/v1/chat/completions`
-    : `http://127.0.0.1:${gatewayPort}/v1/chat/completions`;
-
-  const model = llmModel || 'default';
+  const url = `http://127.0.0.1:${gatewayPort}/v1/chat/completions`;
 
   const headers: any = { 'Content-Type': 'application/json' };
-  if (llmApiKey) {
-    headers['Authorization'] = `Bearer ${llmApiKey}`;
-  } else if (gatewayToken) {
+  if (gatewayToken) {
     headers['Authorization'] = `Bearer ${gatewayToken}`;
   } else if (gatewayPassword) {
     headers['Authorization'] = `Bearer ${gatewayPassword}`;
   }
 
-  log?.info?.(`[Chatroom] LLM call: ${url}, model=${model}`);
+  log?.info?.(`[Chatroom] Gateway call: ${url}`);
 
   try {
     const response = await axios.post(
       url,
       {
-        model,
+        model: 'default',
         messages,
         stream: false,
         max_tokens: 300,
@@ -89,7 +79,7 @@ async function callLLM(ctx: LLMCallContext): Promise<string> {
     const content = response.data?.choices?.[0]?.message?.content || '';
     return content.trim();
   } catch (error: any) {
-    log?.error?.(`[Chatroom] LLM call failed: ${error.message}`);
+    log?.error?.(`[Chatroom] Gateway call failed: ${error.message}`);
     return '[SKIP]';
   }
 }
@@ -123,9 +113,6 @@ const chatroomPlugin = {
         systemPrompt: { type: 'string', default: '', description: 'Additional system prompt' },
         gatewayToken: { type: 'string', default: '', description: 'Gateway auth token (Bearer)' },
         gatewayPassword: { type: 'string', default: '', description: 'Gateway auth password (alternative to token)' },
-        llmBaseUrl: { type: 'string', default: '', description: 'Direct LLM provider URL (e.g., litellm proxy). Bypasses gateway REST.' },
-        llmApiKey: { type: 'string', default: '', description: 'API key for direct LLM provider' },
-        llmModel: { type: 'string', default: '', description: 'Model ID for direct LLM provider (e.g., claude-sonnet-4-5)' },
         proactiveEnabled: { type: 'boolean', default: false, description: 'Enable proactive speaking' },
         proactiveMinIdleTime: { type: 'number', default: 60000, description: 'Min idle time before proactive (ms)' },
         proactiveCooldown: { type: 'number', default: 300000, description: 'Cooldown between proactive messages (ms)' },
@@ -146,9 +133,6 @@ const chatroomPlugin = {
       systemPrompt: { label: 'System Prompt' },
       gatewayToken: { label: 'Gateway Token', sensitive: true },
       gatewayPassword: { label: 'Gateway Password', sensitive: true },
-      llmBaseUrl: { label: 'LLM Provider URL', sensitive: false },
-      llmApiKey: { label: 'LLM API Key', sensitive: true },
-      llmModel: { label: 'LLM Model ID', sensitive: false },
       proactiveEnabled: { label: 'Enable Proactive Speaking' },
       proactiveMinIdleTime: { label: 'Min Idle Time (ms)' },
       proactiveCooldown: { label: 'Proactive Cooldown (ms)' },
@@ -262,11 +246,8 @@ const chatroomPlugin = {
           { role: 'user', content: 'Generate a topic' },
         ];
 
-        return callLLM({
+        return callGateway({
           messages,
-          llmBaseUrl: config.llmBaseUrl,
-          llmApiKey: config.llmApiKey,
-          llmModel: config.llmModel,
           gatewayPort,
           gatewayToken: config.gatewayToken,
           gatewayPassword: config.gatewayPassword,
@@ -365,12 +346,8 @@ const chatroomPlugin = {
               { role: 'user', content: userContent },
             ];
 
-            // Call LLM (direct provider or gateway)
-            let reply = await callLLM({
+            let reply = await callGateway({
               messages,
-              llmBaseUrl: config.llmBaseUrl,
-              llmApiKey: config.llmApiKey,
-              llmModel: config.llmModel,
               gatewayPort,
               gatewayToken: config.gatewayToken,
               gatewayPassword: config.gatewayPassword,
