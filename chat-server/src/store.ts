@@ -231,7 +231,7 @@ class Store {
     const now = Date.now();
     const lastMessage = this.messages.length > 0 ? this.messages[this.messages.length - 1] : null;
     const lastMessageTime = lastMessage ? lastMessage.timestamp : 0;
-    const isIdle = lastMessage ? (now - lastMessage.timestamp) > 60000 : true;
+    const isIdle = lastMessage ? (now - lastMessage.timestamp) > 45000 : true;
 
     // Members who sent messages in last 5 minutes
     const fiveMinutesAgo = now - 5 * 60 * 1000;
