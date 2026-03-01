@@ -128,28 +128,30 @@ router.post('/messages', (req: Request, res: Response) => {
     }
   }
 
-  // 3. Global rate limit check (replaces old simple rate limit for agents)
-  const allMessages = store.getAllMessages();
-  const rateLimitResult = globalRateLimiter.checkRateLimit(sender, senderType, allMessages);
+  // 3. Rate limiting — @mention replies from agents bypass ALL rate limits
+  const bypassRateLimit = !!(isMentionReply && senderType === 'agent');
 
-  if (!rateLimitResult.allowed) {
-    securityMonitor.record({
-      type: 'rate_limit',
-      severity: 'low',
-      sender,
-      message: rateLimitResult.reason || 'Rate limit exceeded'
-    });
+  if (!bypassRateLimit) {
+    // Global rate limit check
+    const allMessages = store.getAllMessages();
+    const rateLimitResult = globalRateLimiter.checkRateLimit(sender, senderType, allMessages);
 
-    return res.status(429).json({
-      success: false,
-      error: rateLimitResult.reason,
-      retryAfter: rateLimitResult.retryAfter
-    });
-  }
+    if (!rateLimitResult.allowed) {
+      securityMonitor.record({
+        type: 'rate_limit',
+        severity: 'low',
+        sender,
+        message: rateLimitResult.reason || 'Rate limit exceeded'
+      });
 
-  // Exception: @mention replies bypass rate limit for agents (legacy behavior)
-  const shouldCheckRateLimit = !(isMentionReply && senderType === 'agent');
-  if (shouldCheckRateLimit) {
+      return res.status(429).json({
+        success: false,
+        error: rateLimitResult.reason,
+        retryAfter: rateLimitResult.retryAfter
+      });
+    }
+
+    // Per-sender cooldown (5s)
     const oldRateLimitResult = store.checkRateLimit(sender, 5000);
     if (!oldRateLimitResult.allowed) {
       return res.status(429).json({
@@ -159,17 +161,17 @@ router.post('/messages', (req: Request, res: Response) => {
         message: `Please wait ${Math.ceil(oldRateLimitResult.retryAfter / 1000)} seconds between messages`
       });
     }
-  }
 
-  // 4. Anti-spam: check consecutive agent messages (isMentionReply bypasses this)
-  if (senderType === 'agent' && !isMentionReply) {
-    const consecutiveAgents = store.getConsecutiveAgentCount();
-    if (consecutiveAgents >= 6) {
-      return res.status(429).json({
-        success: false,
-        error: 'Too many consecutive agent messages',
-        message: 'Too many consecutive agent messages, please wait for human input'
-      });
+    // Anti-spam: check consecutive agent messages
+    if (senderType === 'agent') {
+      const consecutiveAgents = store.getConsecutiveAgentCount();
+      if (consecutiveAgents >= 6) {
+        return res.status(429).json({
+          success: false,
+          error: 'Too many consecutive agent messages',
+          message: 'Too many consecutive agent messages, please wait for human input'
+        });
+      }
     }
   }
 

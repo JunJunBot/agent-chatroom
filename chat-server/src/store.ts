@@ -260,8 +260,8 @@ class Store {
       return { granted: false };
     }
 
-    // Grant lock for 30 seconds
-    const lockUntil = now + 30000;
+    // Grant lock for 120 seconds (prevent other agents from also speaking proactively)
+    const lockUntil = now + 120000;
     this.proactiveLock = { agent: agentName, until: lockUntil };
 
     return { granted: true, lockUntil };
