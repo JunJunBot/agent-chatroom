@@ -60,10 +60,17 @@ router.get('/members', (req: Request, res: Response) => {
 // GET /messages - Get messages with optional filtering
 router.get('/messages', (req: Request, res: Response) => {
   const since = req.query.since ? parseInt(req.query.since as string) : 0;
+  const before = req.query.before ? parseInt(req.query.before as string) : 0;
   const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
 
-  const messages = store.getMessages(since, limit);
-  res.json(messages);
+  if (before > 0) {
+    // Backward pagination: get messages before a timestamp
+    const messages = store.getMessagesBefore(before, limit);
+    res.json(messages);
+  } else {
+    const messages = store.getMessages(since, limit);
+    res.json(messages);
+  }
 });
 
 // POST /messages - Send a message

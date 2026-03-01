@@ -1,4 +1,6 @@
 import { nanoid } from 'nanoid';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface Message {
   id: string;
@@ -26,11 +28,73 @@ export interface Member {
   messageCount?: number;
 }
 
+// ============ Persistence ============
+const DATA_DIR = process.env.DATA_DIR || '/data';
+const MESSAGES_FILE = path.join(DATA_DIR, 'messages.jsonl');
+
 class Store {
   private messages: Message[] = [];
   private members: Map<string, Member> = new Map();
   private lastMessageTime: Map<string, number> = new Map();
   private proactiveLock: { agent: string; until: number } | null = null;
+  private writeStream: fs.WriteStream | null = null;
+
+  constructor() {
+    this.loadFromDisk();
+    this.openWriteStream();
+  }
+
+  // Load persisted messages from JSONL file
+  private loadFromDisk(): void {
+    try {
+      if (!fs.existsSync(MESSAGES_FILE)) {
+        console.log(`[Store] No persistence file found at ${MESSAGES_FILE}, starting fresh`);
+        return;
+      }
+
+      const data = fs.readFileSync(MESSAGES_FILE, 'utf-8');
+      const lines = data.trim().split('\n').filter(Boolean);
+      let loaded = 0;
+
+      for (const line of lines) {
+        try {
+          const msg = JSON.parse(line) as Message;
+          this.messages.push(msg);
+          loaded++;
+        } catch {
+          // Skip corrupted lines
+        }
+      }
+
+      console.log(`[Store] Loaded ${loaded} messages from disk`);
+    } catch (err: any) {
+      console.error(`[Store] Failed to load from disk: ${err.message}`);
+    }
+  }
+
+  // Open append-only write stream for persistence
+  private openWriteStream(): void {
+    try {
+      // Ensure data directory exists
+      if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
+      }
+      this.writeStream = fs.createWriteStream(MESSAGES_FILE, { flags: 'a' });
+      console.log(`[Store] Persistence enabled: ${MESSAGES_FILE}`);
+    } catch (err: any) {
+      console.error(`[Store] Failed to open write stream: ${err.message}`);
+    }
+  }
+
+  // Persist a single message to disk
+  private persistMessage(message: Message): void {
+    if (!this.writeStream) return;
+    try {
+      this.writeStream.write(JSON.stringify(message) + '\n');
+    } catch (err: any) {
+      console.error(`[Store] Failed to persist message: ${err.message}`);
+    }
+  }
 
   // Add a member
   addMember(name: string, type: 'human' | 'agent'): { member: Member; isNew: boolean } {
@@ -81,6 +145,7 @@ class Store {
     };
 
     this.messages.push(message);
+    this.persistMessage(message);
     this.lastMessageTime.set(sender, Date.now());
     this.updateMemberActivity(sender);
 
@@ -90,6 +155,12 @@ class Store {
   // Get messages since timestamp
   getMessages(since: number = 0, limit: number = 50): Message[] {
     const filtered = this.messages.filter(m => m.timestamp > since);
+    return filtered.slice(-limit);
+  }
+
+  // Get messages before a timestamp (for backward pagination / infinite scroll)
+  getMessagesBefore(before: number, limit: number = 50): Message[] {
+    const filtered = this.messages.filter(m => m.timestamp < before);
     return filtered.slice(-limit);
   }
 
@@ -125,14 +196,16 @@ class Store {
     return count;
   }
 
-  // Extract @mentions from content
+  // Extract @mentions from content, validated against known members
   private extractMentions(content: string): string[] {
-    const mentionRegex = /@([^\s@]+)/g;
+    const memberNames = Array.from(this.members.values()).map(m => m.name);
     const mentions: string[] = [];
-    let match;
 
-    while ((match = mentionRegex.exec(content)) !== null) {
-      mentions.push(match[1]);
+    // Try to match each known member name after @
+    for (const name of memberNames) {
+      if (content.includes(`@${name}`)) {
+        mentions.push(name);
+      }
     }
 
     return mentions;

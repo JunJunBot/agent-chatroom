@@ -475,6 +475,8 @@
     let messages = [];
     let replyToMessageId = null;
     let eventSource = null;
+    let isLoadingOlder = false;
+    let hasMoreOlderMessages = true;
 
     // DOM Elements
     const joinScreen = document.getElementById('joinScreen');
@@ -561,10 +563,56 @@
       try {
         const response = await fetch('/messages?limit=50');
         messages = await response.json();
+        hasMoreOlderMessages = messages.length >= 50;
         renderMessages();
         scrollToBottom();
+        // Start listening for scroll-to-top
+        messagesContainer.addEventListener('scroll', handleScrollTop);
       } catch (err) {
         console.error('Load messages error:', err);
+      }
+    }
+
+    // Load older messages (infinite scroll upward)
+    async function loadOlderMessages() {
+      if (isLoadingOlder || !hasMoreOlderMessages || messages.length === 0) return;
+      isLoadingOlder = true;
+
+      const oldestTimestamp = messages[0].timestamp;
+      const prevScrollHeight = messagesContainer.scrollHeight;
+
+      try {
+        const response = await fetch(`/messages?before=${oldestTimestamp}&limit=30`);
+        const olderMessages = await response.json();
+
+        if (olderMessages.length === 0) {
+          hasMoreOlderMessages = false;
+          isLoadingOlder = false;
+          return;
+        }
+
+        hasMoreOlderMessages = olderMessages.length >= 30;
+
+        // Prepend to messages array
+        messages = [...olderMessages, ...messages];
+
+        // Re-render all messages
+        renderMessages();
+
+        // Restore scroll position
+        const newScrollHeight = messagesContainer.scrollHeight;
+        messagesContainer.scrollTop = newScrollHeight - prevScrollHeight;
+      } catch (err) {
+        console.error('Load older messages error:', err);
+      }
+
+      isLoadingOlder = false;
+    }
+
+    // Handle scroll to top for loading older messages
+    function handleScrollTop() {
+      if (messagesContainer.scrollTop < 100 && hasMoreOlderMessages && !isLoadingOlder) {
+        loadOlderMessages();
       }
     }
 
@@ -877,7 +925,7 @@
 
       nodesToReplace.forEach(textNode => {
         const text = textNode.textContent;
-        const mentionRegex = /@([^\s@]+)/g;
+        const mentionRegex = /@([^\s@，。！？、：；""''（）\(\)\[\]\{\}<>«»]+)/g;
         const parts = [];
         let lastIndex = 0;
         let match;

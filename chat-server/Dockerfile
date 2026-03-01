@@ -11,6 +11,9 @@ COPY public/ ./public/
 
 RUN npm run build
 
+# Data directory for message persistence
+VOLUME /data
+
 EXPOSE 3000
 
 CMD ["node", "dist/index.js"]
